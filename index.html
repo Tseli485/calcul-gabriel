@@ -243,7 +243,7 @@ body{
     <section class="card">
       <h2 class="card-title" data-i18n="options">Options</h2>
       <div class="opt-row">
-        <label class="opt-label" data-i18n="pages">Nombre de pages (par opération)</label>
+        <label class="opt-label" data-i18n="pages">Nombre de pages</label>
         <div class="seg" id="pagesSeg">
           <button class="seg-btn" data-val="1">1</button>
           <button class="seg-btn" data-val="2">2</button>
@@ -252,7 +252,7 @@ body{
           <button class="seg-btn" data-val="5">5</button>
         </div>
       </div>
-      <p class="hint" data-i18n="pagesHint">Chaque opération cochée aura son propre nombre de pages. Les types ne sont jamais mélangés sur une page.</p>
+      <p class="hint" data-i18n="pagesHint">Nombre total de pages pour toute la fiche. S’il y a plus d’opérations actives que de pages, plusieurs opérations partageront une même page.</p>
     </section>
 
     <!-- 4. Actions -->
@@ -740,6 +740,7 @@ window.I18N = (function () {
       medium: 'Moyen',
       hard: 'Difficile',
       pages: 'Nombre de pages',
+      pagesHint: 'Nombre total de pages pour toute la fiche. S\u2019il y a plus d\u2019op\u00e9rations actives que de pages, plusieurs op\u00e9rations partageront une m\u00eame page.',
       preview: '👁 Aperçu',
       studentSheet: '📄 Fiche élève (PDF)',
       answerSheet: '✅ Fiche corrigée (PDF)',
@@ -813,6 +814,7 @@ window.I18N = (function () {
       medium: 'Μεσαίο',
       hard: 'Δύσκολο',
       pages: 'Αριθμός σελίδων',
+      pagesHint: 'Συνολικός αριθμός σελίδων για όλο το φύλλο. Αν υπάρχουν περισσότερες ενεργές πράξεις από σελίδες, αρκετές πράξεις θα μοιραστούν την ίδια σελίδα.',
       preview: '👁 Προεπισκόπηση',
       studentSheet: '📄 Φύλλο μαθητή (PDF)',
       answerSheet: '✅ Φύλλο λύσεων (PDF)',
@@ -1003,6 +1005,21 @@ window.LEVELS = (function () {
     return false;
   }
 
+  /* --- nb d'items quand `k` opérations PARTAGENT une même page ---
+     Utilisé quand le parent choisit moins de pages que d'opérations
+     actives : impossible de donner 1 page dédiée à chacune, donc on
+     empile plusieurs opérations sur la même page en répartissant le
+     budget vertical disponible. Facteur 0.82 = marge de sécurité pour
+     les titres de section répétés (chaque opération ajoute son propre
+     "sec-title") qui grignotent un peu de hauteur en plus. */
+  function shareCount(type, choice, k) {
+    k = Math.max(1, k || 1);
+    var pp = perPage(type, choice);
+    var minByType = (type === 'count' || type === 'addPic' || type === 'subPic') ? 2 : 4;
+    var n = Math.round(pp * 0.82 / k);
+    return Math.max(minByType, n);
+  }
+
   /* --- réglage par défaut selon l'âge (auto-adaptation) --- */
   // structure : { grade, ops:[...], digits:{type:choice}, remainder:bool }
   var DEFAULTS = [
@@ -1048,6 +1065,7 @@ window.LEVELS = (function () {
     rangeFor: rangeFor,
     perPage: perPage,
     isPosed: isPosed,
+    shareCount: shareCount,
     defaultForAge: defaultForAge
   };
 })();
@@ -1502,6 +1520,8 @@ window.PDFBUILD = (function () {
     '.ans{color:var(--bad);font-weight:800}' +
     '.rest{font-size:10px;color:#b45309;margin-left:4px}' +
     '.grid-posed{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 16px;align-content:start;flex:1}' +
+    '.sec-title-sm{font-size:13px;padding:4px 12px;margin-bottom:6px}' +
+    '.grid-shared{gap:6px 12px}' +
     '.posed{border:1px solid var(--line);border-radius:9px;background:var(--soft);padding:10px 12px;' +
       'display:flex;justify-content:center;min-height:108px;page-break-inside:avoid}' +
     '.p-stack{display:inline-flex;flex-direction:column;align-items:flex-end;font-variant-numeric:tabular-nums}' +
@@ -1529,8 +1549,8 @@ window.PDFBUILD = (function () {
   }
 
   function buildAllPages(sheet, sections2, cfg, i18n, mode) {
-    var totalPages = 0;
     var pageBlocks = [];
+    var groupedBuckets = {}; // pageGroup -> [innerHTML, ...] (pages partagées entre opérations)
 
     sheet.sections.forEach(function (sec, idx) {
       var desc = sections2[idx];
@@ -1544,19 +1564,40 @@ window.PDFBUILD = (function () {
         ruler = numberRuler(Math.min(10, mx));
       }
 
-      var chunks = chunkItems(sec.items, perPage);
       var title = i18n[SECTION_TITLE[sec.type]] || sec.type;
+      var cls = sectionGridClass(sec.type, posed);
 
+      if (desc.pageGroup !== undefined && desc.pageGroup !== null) {
+        // page PARTAGÉE entre plusieurs opérations : un seul bloc, jamais
+        // re-découpé en plusieurs pages — déjà calibré (LEVELS.shareCount)
+        // pour entrer dans le budget d'UNE page avec les autres opérations
+        // du même groupe.
+        var innerG = '<div class="sec-title sec-title-sm">' + esc(title) + '</div>' + ruler +
+          '<div class="' + cls + ' grid-shared">';
+        sec.items.forEach(function (o) { innerG += renderItem(o, mode, i18n); });
+        innerG += '</div>';
+        var gk = 'g' + desc.pageGroup;
+        if (!groupedBuckets[gk]) groupedBuckets[gk] = [];
+        groupedBuckets[gk].push(innerG);
+        return;
+      }
+
+      var chunks = chunkItems(sec.items, perPage);
       chunks.forEach(function (chunk) {
-        var cls = sectionGridClass(sec.type, posed);
         var inner = '<div class="sec-title">' + esc(title) + '</div>' + ruler + '<div class="' + cls + '">';
         chunk.forEach(function (o) { inner += renderItem(o, mode, i18n); });
         inner += '</div>';
         pageBlocks.push({ inner: inner });
-        totalPages++;
       });
     });
 
+    // pages partagées : 1 page par groupe, blocs des opérations empilés
+    // (l'ordre des groupes suit l'ordre des pages voulu par le parent).
+    Object.keys(groupedBuckets).sort().forEach(function (gk) {
+      pageBlocks.push({ inner: groupedBuckets[gk].join('') });
+    });
+
+    var totalPages = pageBlocks.length;
     var html = '<style>' + sheetCSS() + '</style>';
     for (var p = 0; p < pageBlocks.length; p++) {
       html += buildPageHTML(cfg.label || '', cfg.childName || '', i18n, mode, p + 1, totalPages, pageBlocks[p].inner);
@@ -1843,10 +1884,9 @@ window.PDFBUILD = (function () {
   /* ---------- construction de la config de fiche ---------- */
   /** Répartit `totalPages` pages entre `n` opérations actives, le plus
    *  équitablement possible (méthode des plus grands restes), avec un
-   *  minimum d'1 page par opération. La somme des pages obtenues est
-   *  TOUJOURS égale au nombre de pages choisi par le parent (sauf si ce
-   *  nombre est inférieur au nombre d'opérations actives : impossible de
-   *  descendre sous 1 page/opération, donc le total remonte à `n`). */
+   *  minimum d'1 page par opération. Utilisée uniquement quand il y a
+   *  assez de pages pour donner au moins 1 page dédiée à chaque
+   *  opération (n <= totalPages). */
   function distributePages(n, totalPages) {
     totalPages = Math.max(n, totalPages || 1);
     var base = Math.floor(totalPages / n);
@@ -1856,25 +1896,53 @@ window.PDFBUILD = (function () {
     return out;
   }
 
+  /** Construit les sections à générer pour un enfant. Le nombre de
+   *  pages produites correspond TOUJOURS exactement à state.pages :
+   *   - s'il y a assez de pages pour 1 par opération active : chaque
+   *     opération a sa(ses) propre(s) page(s) dédiée(s) (comportement
+   *     historique, jamais de mélange de types sur une page) ;
+   *   - sinon (plus d'opérations actives que de pages voulues) :
+   *     plusieurs opérations PARTAGENT une même page (pageGroup),
+   *     avec un budget d'items réduit (LEVELS.shareCount) pour que
+   *     l'ensemble tienne sur la page sans la déborder. */
   function buildSections(child) {
     var ops = childOps(child);
     var digits = childDigits(child);
     var def = childDefaults(child);
     var activeTypes = LEVELS.ALL_OPS.filter(function (t) { return !!ops[t]; });
     if (!activeTypes.length) return [];
-    // state.pages = nombre TOTAL de pages voulu pour toute la fiche,
-    // réparti entre les opérations actives (pas par opération).
-    var pagesPer = distributePages(activeTypes.length, state.pages);
     var sections = [];
-    activeTypes.forEach(function (type, i) {
-      var perPage = LEVELS.perPage(type, digits[type]);
-      sections.push({
-        type: type,
-        digits: digits[type],
-        count: perPage * pagesPer[i],
-        remainder: def.remainder
+
+    if (activeTypes.length <= state.pages) {
+      var pagesPer = distributePages(activeTypes.length, state.pages);
+      activeTypes.forEach(function (type, i) {
+        var perPage = LEVELS.perPage(type, digits[type]);
+        sections.push({
+          type: type,
+          digits: digits[type],
+          count: perPage * pagesPer[i],
+          remainder: def.remainder
+        });
       });
-    });
+    } else {
+      // répartition round-robin des opérations actives sur `state.pages`
+      // groupes (pages partagées) — tailles de groupe égales à ±1.
+      var groupSize = {};
+      activeTypes.forEach(function (type, i) {
+        var g = i % state.pages;
+        groupSize[g] = (groupSize[g] || 0) + 1;
+      });
+      activeTypes.forEach(function (type, i) {
+        var g = i % state.pages;
+        sections.push({
+          type: type,
+          digits: digits[type],
+          count: LEVELS.shareCount(type, digits[type], groupSize[g]),
+          remainder: def.remainder,
+          pageGroup: g
+        });
+      });
+    }
     return sections;
   }
 
