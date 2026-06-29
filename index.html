@@ -1013,11 +1013,23 @@ window.LEVELS = (function () {
      les titres de section répétés (chaque opération ajoute son propre
      "sec-title") qui grignotent un peu de hauteur en plus. */
   function shareCount(type, choice, k) {
+    /* Budget réel de contenu utilisable sur une page A4 (mesuré : hauteur
+       de page 1123px − en-tête ~74px − pied ~21px − marges ~60px ≈ 968px).
+       perPage(type) dit combien d'items de ce type remplissent CE budget
+       sur une page dédiée → on en déduit la hauteur réelle d'un item.
+       Quand k opérations partagent la page, chacune reçoit budget/k moins
+       le coût fixe de son titre de section (~34px ; pas de règle numérique
+       en mode partagé, cf. pdf.js). Cette répartition garantit par
+       construction que la somme des sections ne dépasse jamais le budget
+       total — fini le débordement. */
     k = Math.max(1, k || 1);
-    var pp = perPage(type, choice);
-    var minByType = (type === 'count' || type === 'addPic' || type === 'subPic') ? 2 : 4;
-    var n = Math.round(pp * 0.82 / k);
-    return Math.max(minByType, n);
+    var PAGE_BUDGET = 965;
+    var TITLE_OVERHEAD = 34;
+    var pp = Math.max(1, perPage(type, choice));
+    var itemH = PAGE_BUDGET / pp;
+    var budgetPerSection = PAGE_BUDGET / k;
+    var n = Math.floor((budgetPerSection - TITLE_OVERHEAD) / itemH);
+    return Math.max(1, n);
   }
 
   /* --- réglage par défaut selon l'âge (auto-adaptation) --- */
@@ -1571,8 +1583,10 @@ window.PDFBUILD = (function () {
         // page PARTAGÉE entre plusieurs opérations : un seul bloc, jamais
         // re-découpé en plusieurs pages — déjà calibré (LEVELS.shareCount)
         // pour entrer dans le budget d'UNE page avec les autres opérations
-        // du même groupe.
-        var innerG = '<div class="sec-title sec-title-sm">' + esc(title) + '</div>' + ruler +
+        // du même groupe. Pas de règle numérique ici : LEVELS.shareCount
+        // calcule le budget en supposant uniquement le coût du titre, pas
+        // de la règle (qui coûterait ~42px supplémentaires par section).
+        var innerG = '<div class="sec-title sec-title-sm">' + esc(title) + '</div>' +
           '<div class="' + cls + ' grid-shared">';
         sec.items.forEach(function (o) { innerG += renderItem(o, mode, i18n); });
         innerG += '</div>';
