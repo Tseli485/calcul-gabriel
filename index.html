@@ -1023,7 +1023,12 @@ window.LEVELS = (function () {
        construction que la somme des sections ne dépasse jamais le budget
        total — fini le débordement. */
     k = Math.max(1, k || 1);
-    var PAGE_BUDGET = 965;
+    /* 900 (et non 965) : marge de sécurité mesurée empiriquement sur le
+       site déployé — les sections illustrées (count/addPic/subPic) ont
+       un plancher minimum (1 item) dont la hauteur réelle dépasse leur
+       part équitable du budget brut ; ce coussin de ~7% absorbe l'écart
+       sans qu'aucune section ne déborde. */
+    var PAGE_BUDGET = 900;
     var TITLE_OVERHEAD = 34;
     var pp = Math.max(1, perPage(type, choice));
     var itemH = PAGE_BUDGET / pp;
