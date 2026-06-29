@@ -919,6 +919,12 @@ window.LEVELS = (function () {
      doit pouvoir s'entraîner sur des exercices "niveau gardienne". */
   var ALL_OPS = ['count', 'addPic', 'subPic', 'add', 'sub', 'mul', 'div'];
 
+  /* Opérations "illustrées" : un seul item visuel (groupe de fruits)
+     occupe déjà une grande partie de la page — leur hauteur réelle ne
+     suit pas une règle linéaire (cf. shareCount), elle est fixe. */
+  var PIC_TYPES = { count: true, addPic: true, subPic: true };
+  function isPicType(type) { return !!PIC_TYPES[type]; }
+
   /* Valeur de chiffres de repli si l'opération est activée pour un
      enfant en dehors de son niveau par défaut (sinon : plage non
      définie → bug). */
@@ -1009,32 +1015,54 @@ window.LEVELS = (function () {
      Utilisé quand le parent choisit moins de pages que d'opérations
      actives : impossible de donner 1 page dédiée à chacune, donc on
      empile plusieurs opérations sur la même page en répartissant le
-     budget vertical disponible. Facteur 0.82 = marge de sécurité pour
-     les titres de section répétés (chaque opération ajoute son propre
-     "sec-title") qui grignotent un peu de hauteur en plus. */
-  function shareCount(type, choice, k) {
-    /* Budget réel de contenu utilisable sur une page A4 (mesuré : hauteur
-       de page 1123px − en-tête ~74px − pied ~21px − marges ~60px ≈ 968px).
-       perPage(type) dit combien d'items de ce type remplissent CE budget
-       sur une page dédiée → on en déduit la hauteur réelle d'un item.
-       Quand k opérations partagent la page, chacune reçoit budget/k moins
-       le coût fixe de son titre de section (~34px ; pas de règle numérique
-       en mode partagé, cf. pdf.js). Cette répartition garantit par
-       construction que la somme des sections ne dépasse jamais le budget
-       total — fini le débordement. */
+     budget vertical disponible.
+
+     MESURE RÉELLE (site déployé, page 1123px) :
+       en-tête 74px + marge 8px + pied 20.5px + marges page 60px ≈ 162.5px
+       de coût fixe hors contenu → budget de contenu utilisable ≈ 960px.
+
+     Les opérations ILLUSTRÉES (count/addPic/subPic) ont, même à 1 seul
+     item (plancher), une hauteur RÉELLE mesurée bien supérieure à ce que
+     prédit une simple règle linéaire (titre+grille ≈ 160 à 185px selon
+     le type) — une répartition uniforme du budget entre tous les types
+     les sous-estime systématiquement, d'où le débordement observé.
+
+     Stratégie en 2 passes :
+       1. Réserver pour chaque illustrée son coût RÉEL mesuré (avec marge
+          de sécurité) — toujours 1 item, jamais plus, jamais moins.
+       2. Répartir le budget restant entre les opérations NUMÉRIQUES
+          (add/sub/mul/div), puis arrondir leur nombre d'items au
+          multiple de 4 INFÉRIEUR (taille d'une ligne de grille) : un
+          nombre d'items non multiple de 4 occupe de toute façon la
+          même hauteur que le multiple supérieur (la grille ne raccourcit
+          qu'en sautant une ligne entière), donc arrondir vers le haut
+          provoquerait un débordement. Minimum 1 ligne (4 items). */
+  var PAGE_BUDGET = 960;
+  var TITLE_OVERHEAD = 34;
+  var ROW_SIZE = 4;
+  /* Coût fixe mesuré (titre + grille) pour 1 item d'une opération
+     illustrée, marge de sécurité incluse — on retient le pire cas
+     (addPic/subPic) pour garantir l'absence de débordement même si la
+     composition exacte du groupe n'est pas détaillée par l'appelant. */
+  var PIC_FIXED_H = 200;
+
+  function shareCount(type, choice, k, picCount, restCount) {
     k = Math.max(1, k || 1);
-    /* 900 (et non 965) : marge de sécurité mesurée empiriquement sur le
-       site déployé — les sections illustrées (count/addPic/subPic) ont
-       un plancher minimum (1 item) dont la hauteur réelle dépasse leur
-       part équitable du budget brut ; ce coussin de ~7% absorbe l'écart
-       sans qu'aucune section ne déborde. */
-    var PAGE_BUDGET = 900;
-    var TITLE_OVERHEAD = 34;
+    if (isPicType(type)) return 1; // toujours un plancher fixe, jamais de calcul
+
+    picCount = picCount || 0;
+    restCount = Math.max(1, restCount || (k - picCount) || 1);
+
+    var reservedForPics = picCount * PIC_FIXED_H;
+
+    var remaining = Math.max(0, PAGE_BUDGET - reservedForPics);
+    var budgetPerRest = remaining / restCount;
     var pp = Math.max(1, perPage(type, choice));
     var itemH = PAGE_BUDGET / pp;
-    var budgetPerSection = PAGE_BUDGET / k;
-    var n = Math.floor((budgetPerSection - TITLE_OVERHEAD) / itemH);
-    return Math.max(1, n);
+    var raw = Math.floor((budgetPerRest - TITLE_OVERHEAD) / itemH);
+    var rows = Math.floor(raw / ROW_SIZE);
+    var n = rows * ROW_SIZE;
+    return Math.max(ROW_SIZE, n);
   }
 
   /* --- réglage par défaut selon l'âge (auto-adaptation) --- */
@@ -1078,6 +1106,7 @@ window.LEVELS = (function () {
     FRUITS: FRUITS,
     DIGIT_PRESETS: DIGIT_PRESETS,
     ALL_OPS: ALL_OPS,
+    isPicType: isPicType,
     DEFAULT_DIGIT: DEFAULT_DIGIT,
     rangeFor: rangeFor,
     perPage: perPage,
@@ -1946,17 +1975,26 @@ window.PDFBUILD = (function () {
     } else {
       // répartition round-robin des opérations actives sur `state.pages`
       // groupes (pages partagées) — tailles de groupe égales à ±1.
-      var groupSize = {};
+      // On distingue, par groupe, les opérations "illustrées" (count/
+      // addPic/subPic — hauteur fixe incompressible) des opérations
+      // "numériques" (add/sub/mul/div — densité variable) : LEVELS.shareCount
+      // a besoin de cette composition pour réserver le vrai coût des
+      // illustrées avant de répartir le reste entre les numériques
+      // (cf. commentaire dans levels.js).
+      var groupTypes = {};
       activeTypes.forEach(function (type, i) {
         var g = i % state.pages;
-        groupSize[g] = (groupSize[g] || 0) + 1;
+        (groupTypes[g] || (groupTypes[g] = [])).push(type);
       });
       activeTypes.forEach(function (type, i) {
         var g = i % state.pages;
+        var types = groupTypes[g];
+        var picCount = types.filter(function (t) { return LEVELS.isPicType(t); }).length;
+        var restCount = types.length - picCount;
         sections.push({
           type: type,
           digits: digits[type],
-          count: LEVELS.shareCount(type, digits[type], groupSize[g]),
+          count: LEVELS.shareCount(type, digits[type], types.length, picCount, restCount),
           remainder: def.remainder,
           pageGroup: g
         });
