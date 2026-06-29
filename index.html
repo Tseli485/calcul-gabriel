@@ -1304,19 +1304,6 @@ window.GEN = (function () {
   <script>
 /* =====================================================================
  * pdf.js — Rendu HTML → PDF A4
- *
- *  RÈGLES :
- *   • Séparation stricte : 1 type d'opération = sa/ses page(s), jamais de mélange.
- *   • Maternelle (3-6 ans) : PÉDAGOGIE du comptage.
- *       - Une RÈGLE NUMÉRIQUE 1→10 toujours visible en haut de page (référence).
- *       - Activités de comptage : on ENToure le bon nombre, on ne l'écrit pas
- *         (l'enfant ne sait pas encore écrire les chiffres).
- *       - Additions/soustractions illustrées : on compte les fruits réunis,
- *         puis on entoure le résultat.
- *   • Classiques : présentation académique soignée.
- *       - Calculs ≤ 2 chiffres : en ligne, UN seul signe « = ».
- *       - Calculs ≥ 3 chiffres et multiplications : en colonne « posé »,
- *         alignés à droite, barre de résultat.
  * ===================================================================== */
 window.PDFBUILD = (function () {
   'use strict';
@@ -1334,7 +1321,6 @@ window.PDFBUILD = (function () {
     add: 'secAdd', sub: 'secSub', mul: 'secMul', div: 'secDiv'
   };
 
-  /* ---------- en-tête / pied ---------- */
   function pageHeader(label, childName, i18n, pageNum, totalPages, mode) {
     var modeLabel = mode === 'answer'
       ? '<span class="badge badge-ans">' + esc(i18n.answerKey) + '</span>'
@@ -1353,11 +1339,6 @@ window.PDFBUILD = (function () {
   }
   function pageFooter(i18n) { return '<div class="ftr">' + esc(i18n.appTitle) + '</div>'; }
 
-  /* ============================================================
-   *  MATERNELLE — règle numérique + activités d'entourage
-   * ============================================================ */
-
-  /** Règle numérique 1..max (aide-mémoire pour apprendre à compter) */
   function numberRuler(max) {
     var cells = '';
     for (var i = 1; i <= max; i++) {
@@ -1366,7 +1347,6 @@ window.PDFBUILD = (function () {
     return '<div class="ruler"><span class="ruler-lbl">🔢</span>' + cells + '</div>';
   }
 
-  /** Construit une rangée de choix de nombres (à entourer) */
   function choiceRow(correct, lo, hi, mode) {
     var html = '<div class="choices">';
     for (var n = lo; n <= hi; n++) {
@@ -1376,18 +1356,16 @@ window.PDFBUILD = (function () {
     return html + '</div>';
   }
 
-  // Choix entourant la bonne réponse (±2),Bornés à [1, max].
   function choicesAround(correct, max) {
     var lo = Math.max(1, correct - 2);
     var hi = Math.min(max, correct + 2);
-    if (hi - lo < 3) { // garantir au moins 4 choix
+    if (hi - lo < 3) {
       hi = Math.min(max, lo + 3);
       lo = Math.max(1, hi - 3);
     }
     return { lo: lo, hi: hi };
   }
 
-  /** Activité : compter les fruits et entourer le nombre */
   function renderCount(o, mode, i18n) {
     var ch = choicesAround(o.result, o.max || 10);
     return '<div class="pic-card">' +
@@ -1397,9 +1375,7 @@ window.PDFBUILD = (function () {
     '</div>';
   }
 
-  /** Addition illustrée : réunir les groupes, compter, entourer */
   function renderAddPic(o, mode, i18n) {
-    var all = (o.picsA || '') + (o.picsB || ''); // groupes réunis
     var ch = choicesAround(o.result, o.max || 10);
     return '<div class="pic-card">' +
       '<div class="pic-q">' + esc(i18n.addPicPrompt) + '</div>' +
@@ -1413,7 +1389,6 @@ window.PDFBUILD = (function () {
     '</div>';
   }
 
-  /** Soustraction illustrée : barrer ce qu'on enlève, compter ce qui reste */
   function renderSubPic(o, mode, i18n) {
     var ch = choicesAround(o.result, o.max || 10);
     return '<div class="pic-card">' +
@@ -1428,11 +1403,7 @@ window.PDFBUILD = (function () {
     '</div>';
   }
 
-  /* ============================================================
-   *  CLASSIQUES — ligne / posé, UN seul « = »
-   * ============================================================ */
   function renderInline(o, mode) {
-    // UN seul signe « = » : il est dans .eq, la réponse n'en ajoute pas
     var answer;
     if (mode === 'answer') {
       answer = '<span class="ans">' + esc(o.result) + '</span>';
@@ -1446,10 +1417,6 @@ window.PDFBUILD = (function () {
     '</div>';
   }
 
-  /** Posé (vertical) : le plus grand nombre TOUJOURS en haut (sans signe),
-   *  l'opérateur + le plus petit nombre en dessous, puis la barre et le résultat.
-   *  Repère pédagogique constant pour l'enfant, quel que soit l'ordre de tirage
-   *  (addition/multiplication commutatives ; soustraction déjà a ≥ b à la source). */
   function renderPosed(o, mode) {
     var op = o.op || (o.type === 'add' ? '+' : '−');
     var res = o.result;
@@ -1485,13 +1452,9 @@ window.PDFBUILD = (function () {
   function sectionGridClass(type, posed) {
     if (type === 'count' || type === 'addPic' || type === 'subPic') return 'pic-wrap';
     if (posed) return 'grid-posed';
-    // Toujours 4 colonnes pour les calculs en ligne (5 colonnes rendait
-    // les cases trop étroites : "8 + 2 = ____" se cassait sur plusieurs
-    // lignes dans la case → présentation illisible).
     return 'grid grid-4';
   }
 
-  /* ---------- CSS ---------- */
   function sheetCSS() {
     return '' +
     ':root{--ink:#1f2937;--accent:#2563eb;--good:#16a34a;--bad:#dc2626;--soft:#f1f5f9;--line:#cbd5e1}' +
@@ -1499,7 +1462,6 @@ window.PDFBUILD = (function () {
     '.page{width:' + A4_W + 'px;height:' + A4_H + 'px;background:#fff;color:var(--ink);' +
       'font-family:"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;padding:30px 36px;' +
       'display:flex;flex-direction:column;position:relative;overflow:hidden;}' +
-    // header
     '.hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid var(--accent);padding-bottom:8px;margin-bottom:8px}' +
     '.hdr-title{font-size:18px;font-weight:800;color:var(--accent)}' +
     '.hdr-sub{font-size:12px;color:#475569;margin-top:2px;font-weight:600}' +
@@ -1508,19 +1470,13 @@ window.PDFBUILD = (function () {
     '.hdr-page{font-size:10px;color:#64748b;margin-top:5px}' +
     '.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:700}' +
     '.badge-stu{background:#dbeafe;color:#1e40af}.badge-ans{background:#dcfce7;color:#166534}' +
-    // titre de section
     '.sec-title{font-size:16px;font-weight:800;color:#fff;background:var(--accent);padding:6px 14px;border-radius:8px;margin-bottom:12px;align-self:flex-start;box-shadow:0 2px 6px rgba(37,99,235,.25)}' +
-    // footer
     '.ftr{margin-top:auto;padding-top:8px;border-top:1px solid var(--line);font-size:9px;color:#94a3b8;text-align:center}' +
-
-    /* ---- MATERNELLE ---- */
-    // règle numérique (aide au comptage)
     '.ruler{display:flex;align-items:center;gap:4px;background:#fffbeb;border:2px solid #fde68a;' +
       'border-radius:10px;padding:6px 10px;margin-bottom:14px;flex-wrap:wrap}' +
     '.ruler-lbl{font-size:18px;margin-right:4px}' +
     '.rnum{display:inline-grid;place-items:center;min-width:30px;height:30px;border-radius:50%;' +
       'background:#fff;border:2px solid #f59e0b;color:#92400e;font-weight:800;font-size:15px}' +
-    // cartes
     '.pic-wrap{display:flex;flex-wrap:wrap;gap:14px;flex:1;align-content:start}' +
     '.pic-card{flex:1 1 44%;min-width:320px;border:2px solid #fcd34d;border-radius:14px;' +
       'background:linear-gradient(180deg,#fffbeb,#fff);padding:12px 14px;display:flex;flex-direction:column;gap:8px}' +
@@ -1531,24 +1487,20 @@ window.PDFBUILD = (function () {
     '.pic-fruit .grp{display:inline-block}' +
     '.pic-fruit .plus,.pic-fruit .minus{color:var(--accent);font-weight:800;margin:0 6px;font-size:24px}' +
     '.pic-fruit .crossed{opacity:.45;text-decoration:line-through}' +
-    // choix à entourer
     '.choices{display:flex;gap:10px;align-items:center;margin-top:2px;flex-wrap:wrap}' +
     '.choice{display:inline-grid;place-items:center;min-width:36px;height:36px;border-radius:50%;' +
       'border:2px dashed #94a3b8;color:#334155;font-weight:800;font-size:17px;background:#fff}' +
     '.choice-ok{border:3px solid var(--bad);background:#fee2e2;color:var(--bad);box-shadow:0 0 0 3px rgba(220,38,38,.15)}' +
-
-    /* ---- CLASSIQUES en ligne ---- */
     '.grid{display:grid;gap:9px 14px;align-content:start;flex:1}' +
     '.grid-4{grid-template-columns:repeat(4,1fr)}' +
     '.calc{display:flex;align-items:center;justify-content:flex-end;gap:7px;font-size:18px;' +
-      'font-weight:700;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);min-height:52px}' +
-    '.calc .nums{margin-right:auto;font-variant-numeric:tabular-nums}' +
+      'font-weight:700;padding:11px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);' +
+      'min-height:52px;white-space:nowrap;overflow:hidden}' +
+    '.calc .nums{margin-right:auto;font-variant-numeric:tabular-nums;white-space:nowrap}' +
     '.eq{color:var(--accent);font-weight:800}' +
     '.blank{color:#94a3b8;font-weight:600;letter-spacing:2px}' +
     '.ans{color:var(--bad);font-weight:800}' +
     '.rest{font-size:10px;color:#b45309;margin-left:4px}' +
-
-    /* ---- CLASSIQUES posés ---- */
     '.grid-posed{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 16px;align-content:start;flex:1}' +
     '.posed{border:1px solid var(--line);border-radius:9px;background:var(--soft);padding:10px 12px;' +
       'display:flex;justify-content:center;min-height:108px;page-break-inside:avoid}' +
@@ -1562,7 +1514,6 @@ window.PDFBUILD = (function () {
     '.p-rest{font-size:9px;color:#b45309;font-weight:600;margin-top:2px}';
   }
 
-  /* ---------- construction d'une page ---------- */
   function buildPageHTML(label, childName, i18n, mode, pageNum, totalPages, innerHTML) {
     return '<div class="page" data-page="' + pageNum + '">' +
       pageHeader(label, childName, i18n, pageNum, totalPages, mode) +
@@ -1577,7 +1528,6 @@ window.PDFBUILD = (function () {
     return chunks.length ? chunks : [[]];
   }
 
-  /* ---------- toutes les pages ---------- */
   function buildAllPages(sheet, sections2, cfg, i18n, mode) {
     var totalPages = 0;
     var pageBlocks = [];
@@ -1588,12 +1538,8 @@ window.PDFBUILD = (function () {
       var perPage = LEVELS.perPage(sec.type, desc.digits);
       sec.items.forEach(function (it) { it.posed = posed; });
 
-      // règle numérique pour les sections maternelles
       var ruler = '';
       if (sec.type === 'count' || sec.type === 'addPic' || sec.type === 'subPic') {
-        // la règle numérique doit refléter le MAX réellement configuré
-        // (sinon elle propose des nombres que l'enfant n'a pas le droit
-        // de voir dans les choix à entourer → incohérence pédagogique).
         var mx = parseInt(desc.digits, 10); if (isNaN(mx) || mx < 3) mx = 10;
         ruler = numberRuler(Math.min(10, mx));
       }
@@ -1618,7 +1564,6 @@ window.PDFBUILD = (function () {
     return html;
   }
 
-  /* ---------- stage ---------- */
   function getStage() {
     var el = document.getElementById('__pdf_stage');
     if (!el) {
@@ -1659,7 +1604,6 @@ window.PDFBUILD = (function () {
   function exportPDF(fileName) {
     return buildPdfDoc().then(function (pdf) { pdf.save(fileName); });
   }
-  /** Génère le PDF en mémoire (Blob) pour le partage natif (WhatsApp/Messenger/e-mail). */
   function exportPDFBlob() {
     return buildPdfDoc().then(function (pdf) { return pdf.output('blob'); });
   }
