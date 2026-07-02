@@ -1713,10 +1713,10 @@ window.PDFBUILD = (function () {
 
   var state = {
     lang: STORE.getPref('lang', 'fr'),
-    children: STORE.getPref('children', []),     // [{id,name,age}]
+    children: STORE.getPref('children', []),
     activeChildId: STORE.getPref('activeChildId', null),
-    opsEnabled: STORE.getPref('opsEnabled', {}),  // {childId:{type:bool}}
-    digitsByChild: STORE.getPref('digitsByChild', {}), // {childId:{type:choice}}
+    opsEnabled: STORE.getPref('opsEnabled', {}),
+    digitsByChild: STORE.getPref('digitsByChild', {}),
     pages: STORE.getPref('pages', 2),
     lastSheet: null,
     lastCfg: null,
@@ -1750,13 +1750,12 @@ window.PDFBUILD = (function () {
     return o;
   }
   function childDigits(child) {
-    // base = repli universel (toujours défini) < réglage par âge < choix du parent
     var base = Object.assign({}, LEVELS.DEFAULT_DIGIT, childDefaults(child).digits);
     var d = state.digitsByChild[child.id];
     return Object.assign(base, d || {});
   }
 
-  /* ---------- i18n application ---------- */
+  /* ---------- i18n ---------- */
   function applyLang() {
     I18N.set(state.lang);
     document.documentElement.lang = state.lang;
@@ -1777,7 +1776,7 @@ window.PDFBUILD = (function () {
     renderOps();
   }
 
-  /* ---------- rendu liste enfants ---------- */
+  /* ---------- enfants ---------- */
   function renderChildList() {
     var list = document.getElementById('childList');
     if (!state.children.length) {
@@ -1827,7 +1826,6 @@ window.PDFBUILD = (function () {
           var age = parseInt(inp.value, 10);
           if (isNaN(age)) return;
           c.age = age;
-          // l'âge change → on régénère les défauts d'opérations/chiffres si l'enfant n'a pas encore été personnalisé
         } else {
           c.name = inp.value;
         }
@@ -1857,7 +1855,7 @@ window.PDFBUILD = (function () {
     return String(s == null ? '' : s).replace(/"/g, '&quot;');
   }
 
-  /* ---------- rendu opérations ---------- */
+  /* ---------- opérations ---------- */
   var OP_ICON = { count: '🍎', addPic: '🍓', subPic: '🍒', add: '➕', sub: '➖', mul: '✖️', div: '➗' };
   var OP_LABEL_KEY = { count: 'opCount', addPic: 'opAddPic', subPic: 'opSubPic', add: 'opAdd', sub: 'opSub', mul: 'opMul', div: 'opDiv' };
 
@@ -1929,12 +1927,7 @@ window.PDFBUILD = (function () {
     refresh();
   }
 
-  /* ---------- construction de la config de fiche ---------- */
-  /** Répartit `totalPages` pages entre `n` opérations actives, le plus
-   *  équitablement possible (méthode des plus grands restes), avec un
-   *  minimum d'1 page par opération. Utilisée uniquement quand il y a
-   *  assez de pages pour donner au moins 1 page dédiée à chaque
-   *  opération (n <= totalPages). */
+  /* ---------- sections ---------- */
   function distributePages(n, totalPages) {
     totalPages = Math.max(n, totalPages || 1);
     var base = Math.floor(totalPages / n);
@@ -1944,15 +1937,6 @@ window.PDFBUILD = (function () {
     return out;
   }
 
-  /** Construit les sections à générer pour un enfant. Le nombre de
-   *  pages produites correspond TOUJOURS exactement à state.pages :
-   *   - s'il y a assez de pages pour 1 par opération active : chaque
-   *     opération a sa(ses) propre(s) page(s) dédiée(s) (comportement
-   *     historique, jamais de mélange de types sur une page) ;
-   *   - sinon (plus d'opérations actives que de pages voulues) :
-   *     plusieurs opérations PARTAGENT une même page (pageGroup),
-   *     avec un budget d'items réduit (LEVELS.shareCount) pour que
-   *     l'ensemble tienne sur la page sans la déborder. */
   function buildSections(child) {
     var ops = childOps(child);
     var digits = childDigits(child);
@@ -1973,14 +1957,6 @@ window.PDFBUILD = (function () {
         });
       });
     } else {
-      // répartition round-robin des opérations actives sur `state.pages`
-      // groupes (pages partagées) — tailles de groupe égales à ±1.
-      // On distingue, par groupe, les opérations "illustrées" (count/
-      // addPic/subPic — hauteur fixe incompressible) des opérations
-      // "numériques" (add/sub/mul/div — densité variable) : LEVELS.shareCount
-      // a besoin de cette composition pour réserver le vrai coût des
-      // illustrées avant de répartir le reste entre les numériques
-      // (cf. commentaire dans levels.js).
       var groupTypes = {};
       activeTypes.forEach(function (type, i) {
         var g = i % state.pages;
@@ -2023,6 +1999,34 @@ window.PDFBUILD = (function () {
     state.lastSections = sections;
     state.lastMode = mode;
     return { sheet: sheet, cfg: cfg, sections: sections };
+  }
+
+  /* ---------- panneau partage (fallback desktop / fichier local) ---------- */
+  function showSharePanel() {
+    var old = document.getElementById('shareOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'shareOverlay';
+    overlay.className = 'share-overlay';
+
+    var panel = document.createElement('div');
+    panel.className = 'share-panel';
+    panel.innerHTML =
+      '<button class="sp-close" aria-label="close">&#x2715;</button>' +
+      '<h3>&#x1F4E4; ' + I18N.t('share') + '</h3>' +
+      '<p>' + I18N.t('shareFallback') + '</p>' +
+      '<div class="sp-actions">' +
+        '<button class="btn btn-primary" id="spClose">OK</button>' +
+      '</div>';
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    panel.querySelector('.sp-close').addEventListener('click', close);
+    document.getElementById('spClose').addEventListener('click', close);
   }
 
   /* ---------- toast ---------- */
@@ -2075,7 +2079,6 @@ window.PDFBUILD = (function () {
     document.getElementById('btnAnswer').addEventListener('click', function () {
       var sel = ensureSelection();
       if (!sel) return;
-      // on réutilise la dernière fiche générée si elle existe pour cet enfant, sinon on en crée une
       var res;
       if (state.lastSheet && state.lastCfg && state.lastCfg.id === sel.child.id) {
         res = { sheet: state.lastSheet, cfg: state.lastCfg, sections: state.lastSections };
@@ -2112,9 +2115,6 @@ window.PDFBUILD = (function () {
         var file;
         try { file = new File([blob], fileName, { type: 'application/pdf' }); } catch (e) { file = null; }
 
-        // file:// = usage normal de cette appli (fichier autonome ouvert en double-clic).
-        // navigator.share() y est instable/indisponible sous Chrome en local et peut
-        // planter l'onglet (RESULT_CODE_KILLED_BAD_MESSAGE) → on ne l'appelle JAMAIS sur file:.
         var canFileShare = false;
         try {
           canFileShare = !!(file && navigator.canShare && navigator.share &&
@@ -2124,8 +2124,7 @@ window.PDFBUILD = (function () {
         if (canFileShare) {
           navigator.share({ files: [file], title: I18N.t('appTitle'), text: I18N.t('appSubtitle') }).catch(function () {});
         } else {
-          // Partage natif de fichier indisponible (cas normal en file://) :
-          // on télécharge le PDF puis on explique comment le joindre manuellement.
+          // Télécharge le PDF puis affiche les instructions dans un panneau intégré
           var url = URL.createObjectURL(blob);
           var a = document.createElement('a');
           a.href = url;
@@ -2134,7 +2133,7 @@ window.PDFBUILD = (function () {
           a.click();
           document.body.removeChild(a);
           setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-          window.alert(I18N.t('shareFallback'));
+          showSharePanel();
         }
       }).catch(function () {
         toast(I18N.t('share'));
@@ -2150,7 +2149,7 @@ window.PDFBUILD = (function () {
     });
   }
 
-  /* ---------- install banner (PWA) ---------- */
+  /* ---------- install banner ---------- */
   function bindInstall() {
     var deferred = null;
     window.addEventListener('beforeinstallprompt', function (e) {
